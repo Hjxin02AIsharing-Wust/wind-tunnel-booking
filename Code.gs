@@ -1,6 +1,6 @@
 /*******************************************************
  * 循环回流式风洞设备预约系统 - 高级版后端
- * 平台：Google Apps Script
+ * 平台：Google Apps Script11
  *******************************************************/
 
 const SPREADSHEET_ID = "13hzi6nwEoBNWZDlfcaHzUi2D2JPuOuVHbSz9Bt67cDo";
