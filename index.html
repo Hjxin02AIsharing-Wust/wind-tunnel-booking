@@ -736,7 +736,6 @@
     const HOUR_HEIGHT = 40;
 
     let selectedDateBookings = [];
-    let renderingTimeline = false;
 
     const form = document.getElementById("bookingForm");
     const submitBtn = document.getElementById("submitBtn");
@@ -807,7 +806,7 @@
       const duration = Number(durationSelect.value);
 
       if (!start || !duration) {
-        updateDraftBlock();
+        updateAllSelectedViews();
         return;
       }
 
@@ -817,7 +816,7 @@
       const m = endMin % 60;
 
       endTimeInput.value = String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0");
-      updateDraftBlock();
+      updateAllSelectedViews();
     }
 
     function switchView(view) {
@@ -842,28 +841,31 @@
       document.getElementById("timelineArea").style.minHeight = ((CLOSE_HOUR - OPEN_HOUR) * HOUR_HEIGHT) + "px";
     }
 
-    function renderTimeline(bookings) {
-      if (renderingTimeline) return;
-      renderingTimeline = true;
+    function getBookingKey(item) {
+      return item.date + "|" + item.startTime + "|" + item.endTime + "|" + item.name;
+    }
 
+    function renderTimeline(bookings, conflictKeys = []) {
       const area = document.getElementById("timelineArea");
       const draft = document.getElementById("draftBlock");
       area.querySelectorAll(".booking-block").forEach(node => node.remove());
 
-      const conflicts = getConflictBookings();
-      const conflictKeys = conflicts.map(item => item.date + item.startTime + item.endTime + item.name);
+      if (!bookings || bookings.length === 0) {
+        return;
+      }
 
-      (bookings || []).forEach(item => {
+      bookings.forEach(item => {
         const start = timeToMinutes(item.startTime);
         const end = timeToMinutes(item.endTime);
         const clippedStart = Math.max(start, OPEN_HOUR * 60);
         const clippedEnd = Math.min(end, CLOSE_HOUR * 60);
+
         if (clippedEnd <= clippedStart) return;
 
-        const block = document.createElement("div");
-        const key = item.date + item.startTime + item.endTime + item.name;
+        const key = getBookingKey(item);
         const conflict = conflictKeys.includes(key);
 
+        const block = document.createElement("div");
         block.className = "booking-block" + (conflict ? " conflict" : "");
         block.style.top = minutesToTop(clippedStart) + "px";
         block.style.height = durationToHeight(clippedStart, clippedEnd) + "px";
@@ -877,12 +879,9 @@
 
         area.insertBefore(block, draft);
       });
-
-      renderingTimeline = false;
-      updateDraftBlockOnly();
     }
 
-    function updateDraftBlockOnly() {
+    function renderDraftBlock(conflicts) {
       const draft = document.getElementById("draftBlock");
       const range = getCurrentDraftRange();
 
@@ -899,8 +898,6 @@
         return;
       }
 
-      const conflicts = getConflictBookings();
-
       draft.style.display = "block";
       draft.style.top = minutesToTop(clippedStart) + "px";
       draft.style.height = durationToHeight(clippedStart, clippedEnd) + "px";
@@ -908,6 +905,20 @@
       draft.textContent = conflicts.length > 0
         ? "拟预约时段冲突：" + range.startTime + " - " + range.endTime
         : "拟预约时段：" + range.startTime + " - " + range.endTime;
+    }
+
+    function updateAllSelectedViews() {
+      const conflicts = getConflictBookings();
+      const conflictKeys = conflicts.map(getBookingKey);
+
+      renderTimeline(selectedDateBookings, conflictKeys);
+      renderDraftBlock(conflicts);
+      renderBookingList(
+        "selectedDateBookingList",
+        selectedDateBookings,
+        "该日期暂无预约，可正常预约。",
+        conflictKeys
+      );
 
       if (conflicts.length > 0) {
         showStatus("warning", "提示：当前填写的时段与已预约时段冲突，冲突项已用红色高亮。");
@@ -915,29 +926,6 @@
         statusBox.className = "status";
         statusBox.textContent = "";
       }
-    }
-
-    function updateDraftBlock() {
-      updateDraftBlockOnly();
-      renderSelectedListOnly();
-      renderTimeline(selectedDateBookings);
-    }
-
-    function renderSelectedListOnly() {
-      const conflicts = getConflictBookings();
-      const conflictKeys = conflicts.map(item => item.date + item.startTime + item.endTime + item.name);
-
-      renderBookingList(
-        "selectedDateBookingList",
-        selectedDateBookings,
-        "该日期暂无预约，可正常预约。",
-        conflictKeys
-      );
-    }
-
-    function renderSelectedViews() {
-      renderSelectedListOnly();
-      renderTimeline(selectedDateBookings);
     }
 
     function renderBookingList(containerId, bookings, emptyText, conflictKeys = []) {
@@ -950,7 +938,7 @@
       }
 
       bookings.forEach(item => {
-        const key = item.date + item.startTime + item.endTime + item.name;
+        const key = getBookingKey(item);
         const div = document.createElement("div");
         div.className = "booking-item" + (conflictKeys.includes(key) ? " conflict" : "");
         div.innerHTML = `
@@ -1033,13 +1021,13 @@
             selectedDateBookings = result.bookings || [];
             document.getElementById("selectedBookingCount").textContent = result.count || 0;
             document.getElementById("selectedUsedHours").textContent = result.stats ? result.stats.usedHours : calculateUsedHours(selectedDateBookings);
-            renderSelectedViews();
+            updateAllSelectedViews();
           } else {
             selectedDateBookings = [];
             document.getElementById("selectedBookingCount").textContent = "0";
             document.getElementById("selectedUsedHours").textContent = "0";
             renderBookingList("selectedDateBookingList", [], result.message || "读取失败。");
-            renderTimeline([]);
+            renderTimeline([], []);
           }
         })
         .withFailureHandler(function(error) {
@@ -1047,7 +1035,7 @@
           document.getElementById("selectedBookingCount").textContent = "0";
           document.getElementById("selectedUsedHours").textContent = "0";
           renderBookingList("selectedDateBookingList", [], "读取失败：" + error.message);
-          renderTimeline([]);
+          renderTimeline([], []);
         })
         .listBookingsByDate(selectedDate);
     }
@@ -1114,7 +1102,7 @@
       const conflicts = getConflictBookings();
       if (conflicts.length > 0) {
         showStatus("error", "预约失败：当前时段与已预约信息冲突，冲突项已高亮显示。请更换时间。");
-        renderSelectedViews();
+        updateAllSelectedViews();
         return;
       }
 
@@ -1162,7 +1150,7 @@
 
     durationSelect.addEventListener("change", updateEndTime);
     startTimeInput.addEventListener("change", updateEndTime);
-    endTimeInput.addEventListener("change", updateDraftBlock);
+    endTimeInput.addEventListener("change", updateAllSelectedViews);
 
     dateInput.addEventListener("change", function() {
       viewDateInput.value = dateInput.value;
