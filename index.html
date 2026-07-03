@@ -2,7 +2,6 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <base target="_top">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>循环回流式风洞设备预约系统</title>
   <style>
@@ -544,7 +543,7 @@
       <div class="stat-card">
         <div class="stat-label">今日可用</div>
         <div class="stat-value" id="todayFreeHours">--</div>
-        <div class="stat-note">按 08:00–22:00 统计</div>
+        <div class="stat-note">按 00:00–24:00 统计</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">今日使用率</div>
@@ -713,7 +712,7 @@
               <div class="info-line"><strong>所属课题组</strong><span>王中林课题组</span></div>
               <div class="info-line"><strong>设备管理人</strong><span>胡家鑫</span></div>
               <div class="info-line"><strong>联系电话</strong><span>18627506509</span></div>
-              <div class="info-line"><strong>统计时段</strong><span>08:00–22:00</span></div>
+              <div class="info-line"><strong>统计时段</strong><span>00:00–24:00</span></div>
             </div>
             <ul class="rules">
               <li>预约成功后方可使用设备，不得擅自占用他人时段。</li>
@@ -731,11 +730,14 @@
   <footer>循环回流式风洞设备预约系统｜高级版</footer>
 
   <script>
-    const OPEN_HOUR = 8;
-    const CLOSE_HOUR = 22;
-    const HOUR_HEIGHT = 40;
+    const API_URL = "https://script.google.com/macros/s/AKfycbzMAwNbFSbxI6urBul6rNGwwapi9jv35TtaoHWjCd5TY4gpVYIgS_pa-sfW3vXrfILMcA/exec";
+
+    const OPEN_HOUR = 0;
+    const CLOSE_HOUR = 24;
+    const HOUR_HEIGHT = 32;
 
     let selectedDateBookings = [];
+    let renderingTimeline = false;
 
     const form = document.getElementById("bookingForm");
     const submitBtn = document.getElementById("submitBtn");
@@ -745,6 +747,27 @@
     const endTimeInput = document.getElementById("endTime");
     const dateInput = document.getElementById("date");
     const viewDateInput = document.getElementById("viewDate");
+
+    async function apiCall(action, data = {}) {
+      const response = await fetch(API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "text/plain;charset=utf-8"
+        },
+        body: JSON.stringify({
+          action: action,
+          ...data
+        })
+      });
+
+      const text = await response.text();
+
+      try {
+        return JSON.parse(text);
+      } catch (error) {
+        throw new Error("后端返回的不是 JSON。请检查 Apps Script 是否已重新部署为最新 GitHub 后端版本。返回内容：" + text.slice(0, 160));
+      }
+    }
 
     function showStatus(type, message) {
       statusBox.className = "status " + type;
@@ -806,7 +829,7 @@
       const duration = Number(durationSelect.value);
 
       if (!start || !duration) {
-        updateAllSelectedViews();
+        updateDraftBlock();
         return;
       }
 
@@ -816,7 +839,7 @@
       const m = endMin % 60;
 
       endTimeInput.value = String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0");
-      updateAllSelectedViews();
+      updateDraftBlock();
     }
 
     function switchView(view) {
@@ -846,26 +869,24 @@
     }
 
     function renderTimeline(bookings, conflictKeys = []) {
+      if (renderingTimeline) return;
+      renderingTimeline = true;
+
       const area = document.getElementById("timelineArea");
       const draft = document.getElementById("draftBlock");
       area.querySelectorAll(".booking-block").forEach(node => node.remove());
 
-      if (!bookings || bookings.length === 0) {
-        return;
-      }
-
-      bookings.forEach(item => {
+      (bookings || []).forEach(item => {
         const start = timeToMinutes(item.startTime);
         const end = timeToMinutes(item.endTime);
         const clippedStart = Math.max(start, OPEN_HOUR * 60);
         const clippedEnd = Math.min(end, CLOSE_HOUR * 60);
-
         if (clippedEnd <= clippedStart) return;
 
+        const block = document.createElement("div");
         const key = getBookingKey(item);
         const conflict = conflictKeys.includes(key);
 
-        const block = document.createElement("div");
         block.className = "booking-block" + (conflict ? " conflict" : "");
         block.style.top = minutesToTop(clippedStart) + "px";
         block.style.height = durationToHeight(clippedStart, clippedEnd) + "px";
@@ -879,9 +900,12 @@
 
         area.insertBefore(block, draft);
       });
+
+      renderingTimeline = false;
+      renderDraftBlock();
     }
 
-    function renderDraftBlock(conflicts) {
+    function renderDraftBlock() {
       const draft = document.getElementById("draftBlock");
       const range = getCurrentDraftRange();
 
@@ -898,6 +922,8 @@
         return;
       }
 
+      const conflicts = getConflictBookings();
+
       draft.style.display = "block";
       draft.style.top = minutesToTop(clippedStart) + "px";
       draft.style.height = durationToHeight(clippedStart, clippedEnd) + "px";
@@ -905,20 +931,6 @@
       draft.textContent = conflicts.length > 0
         ? "拟预约时段冲突：" + range.startTime + " - " + range.endTime
         : "拟预约时段：" + range.startTime + " - " + range.endTime;
-    }
-
-    function updateAllSelectedViews() {
-      const conflicts = getConflictBookings();
-      const conflictKeys = conflicts.map(getBookingKey);
-
-      renderTimeline(selectedDateBookings, conflictKeys);
-      renderDraftBlock(conflicts);
-      renderBookingList(
-        "selectedDateBookingList",
-        selectedDateBookings,
-        "该日期暂无预约，可正常预约。",
-        conflictKeys
-      );
 
       if (conflicts.length > 0) {
         showStatus("warning", "提示：当前填写的时段与已预约时段冲突，冲突项已用红色高亮。");
@@ -926,6 +938,24 @@
         statusBox.className = "status";
         statusBox.textContent = "";
       }
+    }
+
+    function updateDraftBlock() {
+      renderSelectedViews();
+    }
+
+    function renderSelectedViews() {
+      const conflicts = getConflictBookings();
+      const conflictKeys = conflicts.map(getBookingKey);
+
+      renderBookingList(
+        "selectedDateBookingList",
+        selectedDateBookings,
+        "该日期暂无预约，可正常预约。",
+        conflictKeys
+      );
+
+      renderTimeline(selectedDateBookings, conflictKeys);
     }
 
     function renderBookingList(containerId, bookings, emptyText, conflictKeys = []) {
@@ -1007,7 +1037,7 @@
       });
     }
 
-    function loadSelectedDateBookings() {
+    async function loadSelectedDateBookings() {
       const selectedDate = viewDateInput.value;
       if (!selectedDate) return;
 
@@ -1015,29 +1045,28 @@
       document.getElementById("selectedBookingCount").textContent = "...";
       document.getElementById("selectedUsedHours").textContent = "...";
 
-      google.script.run
-        .withSuccessHandler(function(result) {
-          if (result.success) {
-            selectedDateBookings = result.bookings || [];
-            document.getElementById("selectedBookingCount").textContent = result.count || 0;
-            document.getElementById("selectedUsedHours").textContent = result.stats ? result.stats.usedHours : calculateUsedHours(selectedDateBookings);
-            updateAllSelectedViews();
-          } else {
-            selectedDateBookings = [];
-            document.getElementById("selectedBookingCount").textContent = "0";
-            document.getElementById("selectedUsedHours").textContent = "0";
-            renderBookingList("selectedDateBookingList", [], result.message || "读取失败。");
-            renderTimeline([], []);
-          }
-        })
-        .withFailureHandler(function(error) {
+      try {
+        const result = await apiCall("listBookingsByDate", { date: selectedDate });
+
+        if (result.success) {
+          selectedDateBookings = result.bookings || [];
+          document.getElementById("selectedBookingCount").textContent = result.count || 0;
+          document.getElementById("selectedUsedHours").textContent = result.stats ? result.stats.usedHours : calculateUsedHours(selectedDateBookings);
+          renderSelectedViews();
+        } else {
           selectedDateBookings = [];
           document.getElementById("selectedBookingCount").textContent = "0";
           document.getElementById("selectedUsedHours").textContent = "0";
-          renderBookingList("selectedDateBookingList", [], "读取失败：" + error.message);
+          renderBookingList("selectedDateBookingList", [], result.message || "读取失败。");
           renderTimeline([], []);
-        })
-        .listBookingsByDate(selectedDate);
+        }
+      } catch (error) {
+        selectedDateBookings = [];
+        document.getElementById("selectedBookingCount").textContent = "0";
+        document.getElementById("selectedUsedHours").textContent = "0";
+        renderBookingList("selectedDateBookingList", [], "读取失败：" + error.message);
+        renderTimeline([], []);
+      }
     }
 
     function calculateUsedHours(bookings) {
@@ -1050,41 +1079,43 @@
       return Math.round((minutes / 60) * 10) / 10;
     }
 
-    function loadMonthBookings() {
+    async function loadMonthBookings() {
       const container = document.getElementById("monthBookingList");
       container.innerHTML = '<div class="empty-box">正在读取未来一个月预约信息...</div>';
 
-      google.script.run
-        .withSuccessHandler(function(result) {
-          if (result.success) {
-            renderMonthBookings(result.bookings || []);
-          } else {
-            container.innerHTML = '<div class="empty-box">' + (result.message || "读取失败。") + '</div>';
-          }
-        })
-        .withFailureHandler(function(error) {
-          container.innerHTML = '<div class="empty-box">读取失败：' + error.message + '</div>';
-        })
-        .listMonthBookings();
+      try {
+        const result = await apiCall("listMonthBookings");
+        if (result.success) {
+          renderMonthBookings(result.bookings || []);
+        } else {
+          container.innerHTML = '<div class="empty-box">' + (result.message || "读取失败。") + '</div>';
+        }
+      } catch (error) {
+        container.innerHTML = '<div class="empty-box">读取失败：' + error.message + '</div>';
+      }
     }
 
-    function loadDashboard() {
+    async function loadDashboard() {
       const selectedDate = viewDateInput.value;
 
-      google.script.run
-        .withSuccessHandler(function(result) {
-          if (!result.success) return;
+      try {
+        const result = await apiCall("getDashboardData", { date: selectedDate });
+        if (!result.success) return;
 
-          document.getElementById("todayDateText").textContent = formatDateText(result.todayDate);
-          document.getElementById("todayBookingCount").textContent = result.todayStats.bookingCount;
-          document.getElementById("todayUsedHours").textContent = result.todayStats.usedHours;
-          document.getElementById("todayFreeHours").textContent = result.todayStats.freeHours;
-          document.getElementById("todayUsageRate").textContent = result.todayStats.usageRate + "%";
-        })
-        .getDashboardData(selectedDate);
+        document.getElementById("todayDateText").textContent = formatDateText(result.todayDate);
+        document.getElementById("todayBookingCount").textContent = result.todayStats.bookingCount;
+        document.getElementById("todayUsedHours").textContent = result.todayStats.usedHours;
+        document.getElementById("todayFreeHours").textContent = result.todayStats.freeHours;
+        document.getElementById("todayUsageRate").textContent = result.todayStats.usageRate + "%";
+      } catch (error) {
+        document.getElementById("todayBookingCount").textContent = "--";
+        document.getElementById("todayUsedHours").textContent = "--";
+        document.getElementById("todayFreeHours").textContent = "--";
+        document.getElementById("todayUsageRate").textContent = "--";
+      }
     }
 
-    form.addEventListener("submit", function(event) {
+    form.addEventListener("submit", async function(event) {
       event.preventDefault();
 
       const checkedItems = Array.from(document.querySelectorAll('input[name="checks"]:checked'));
@@ -1102,7 +1133,7 @@
       const conflicts = getConflictBookings();
       if (conflicts.length > 0) {
         showStatus("error", "预约失败：当前时段与已预约信息冲突，冲突项已高亮显示。请更换时间。");
-        updateAllSelectedViews();
+        renderSelectedViews();
         return;
       }
 
@@ -1121,36 +1152,33 @@
       submitBtn.disabled = true;
       submitBtn.textContent = "正在提交...";
 
-      google.script.run
-        .withSuccessHandler(function(result) {
-          if (result.success) {
-            showStatus("success", result.message);
-            const reservedDate = payload.date;
-            form.reset();
-            dateInput.value = reservedDate;
-            viewDateInput.value = reservedDate;
-            loadSelectedDateBookings();
-            loadMonthBookings();
-            loadDashboard();
-          } else {
-            showStatus(result.conflict ? "error" : "warning", result.message);
-            loadSelectedDateBookings();
-          }
+      try {
+        const result = await apiCall("submitBooking", { payload });
 
-          submitBtn.disabled = false;
-          submitBtn.textContent = "提交预约";
-        })
-        .withFailureHandler(function(error) {
-          showStatus("error", "提交失败：" + error.message);
-          submitBtn.disabled = false;
-          submitBtn.textContent = "提交预约";
-        })
-        .submitBooking(payload);
+        if (result.success) {
+          showStatus("success", result.message);
+          const reservedDate = payload.date;
+          form.reset();
+          dateInput.value = reservedDate;
+          viewDateInput.value = reservedDate;
+          await loadSelectedDateBookings();
+          await loadMonthBookings();
+          await loadDashboard();
+        } else {
+          showStatus(result.conflict ? "error" : "warning", result.message);
+          await loadSelectedDateBookings();
+        }
+      } catch (error) {
+        showStatus("error", "提交失败：" + error.message);
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = "提交预约";
+      }
     });
 
     durationSelect.addEventListener("change", updateEndTime);
     startTimeInput.addEventListener("change", updateEndTime);
-    endTimeInput.addEventListener("change", updateAllSelectedViews);
+    endTimeInput.addEventListener("change", updateDraftBlock);
 
     dateInput.addEventListener("change", function() {
       viewDateInput.value = dateInput.value;
