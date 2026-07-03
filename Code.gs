@@ -12,14 +12,56 @@ const GROUP_NAME = "王中林课题组";
 const MANAGER_NAME = "胡家鑫";
 const MANAGER_PHONE = "18627506509";
 
-const OPEN_HOUR = 8;
-const CLOSE_HOUR = 22;
+const OPEN_HOUR = 0;
+const CLOSE_HOUR = 24;
 
-function doGet() {
-  return HtmlService.createHtmlOutputFromFile("Index")
-    .setTitle("循环回流式风洞设备预约系统")
-    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+function doGet(e) {
+  return jsonOutput({
+    success: true,
+    message: "循环回流式风洞设备预约系统 GitHub 后端运行正常。",
+    usage: "请通过 GitHub Pages 前端访问预约系统。"
+  });
 }
+
+function doPost(e) {
+  try {
+    const request = JSON.parse(e.postData && e.postData.contents ? e.postData.contents : "{}");
+    const action = request.action;
+
+    if (action === "submitBooking") {
+      return jsonOutput(submitBooking(request.payload || {}));
+    }
+
+    if (action === "listBookingsByDate") {
+      return jsonOutput(listBookingsByDate(request.date));
+    }
+
+    if (action === "listMonthBookings") {
+      return jsonOutput(listMonthBookings());
+    }
+
+    if (action === "getDashboardData") {
+      return jsonOutput(getDashboardData(request.date));
+    }
+
+    return jsonOutput({
+      success: false,
+      message: "未知请求类型：" + action
+    });
+  } catch (error) {
+    return jsonOutput({
+      success: false,
+      message: "后端请求处理失败：" + error.message
+    });
+  }
+}
+
+function jsonOutput(object) {
+  return ContentService
+    .createTextOutput(JSON.stringify(object))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
 
 function submitBooking(data) {
   try {
